@@ -1,5 +1,6 @@
 import type { RetiredAuthProfileCleanupPlan } from "../commands/doctor-auth-legacy-oauth.js";
 import type { probeGatewayMemoryStatus } from "../commands/doctor-gateway-health.js";
+import type { DoctorMaintenancePending } from "../commands/doctor-maintenance-pending.js";
 import type { DoctorOptions, DoctorPrompter } from "../commands/doctor-prompter.js";
 import type { DoctorConfigReferenceSource } from "../commands/doctor/shared/config-flow-steps.js";
 import type { ProviderRename } from "../commands/doctor/shared/provider-rename.js";
@@ -16,10 +17,12 @@ import type { RuntimeEnv } from "../runtime.js";
 import type { AgentDatabaseAdmissionRefusal } from "../state/agent-database-admission.js";
 import type { DoctorUpdateBudget, DoctorUpdateWork } from "./doctor-update-budget.js";
 import type { DoctorHealthCheck } from "./health-check-runner-types.js";
-import type { HealthCheckContext } from "./health-checks.js";
+import type { HealthCheckContext, HealthFinding } from "./health-checks.js";
 
 type DoctorConfigResult = {
   cfg: OpenClawConfig;
+  /** Captured before config retirement; shared by every heartbeat migration step. */
+  heartbeatMigrationSource?: OpenClawConfig;
   warnings?: string[];
   /** Original authored/resolved pair; retained across every committed Doctor write. */
   referenceSource?: DoctorConfigReferenceSource;
@@ -33,6 +36,8 @@ type DoctorConfigResult = {
   modelBillingRouteWarnings?: readonly string[];
   /** Successful retirement pass awaiting the config-write/no-change boundary. */
   modelRetirementRepairRan?: boolean;
+  retirementOnly?: boolean;
+  retirementOnlyBlockers?: readonly string[];
   sourceConfigValid?: boolean;
   sourceLastTouchedVersion?: string;
   skipPluginValidationOnWrite?: boolean;
@@ -56,9 +61,12 @@ type DoctorConfigResult = {
   stateMigrationStepReceipts?: LegacyStateMigrationStepReceipt[];
   postSessionPluginMigration?: PreparedPostSessionPluginMigration;
   postSessionPluginMigrationPlanBound?: boolean;
+  preflightLegacyStateConfig?: OpenClawConfig;
 };
 
 export type DoctorHealthFlowContext = {
+  /** Cleared when a retained owner discovers work requiring the full pass. */
+  retirementOnly?: boolean;
   runtime: RuntimeEnv;
   options: DoctorOptions;
   prompter: DoctorPrompter;
@@ -93,6 +101,8 @@ export type DoctorHealthFlowContext = {
   gatewayMemoryProbe?: Awaited<ReturnType<typeof probeGatewayMemoryStatus>>;
   postInstallDoctorResult?: UpdatePostInstallDoctorResult;
   updateWarnings?: string[];
+  /** Findings awaiting the final current-state summary; effects and prompts remain streamed. */
+  healthFindings?: HealthFinding[];
   runWithPluginMetadataSnapshot?: PluginMetadataSnapshotScopeRunner;
   invalidatePluginMetadataSnapshot?: () => void;
 };
@@ -115,6 +125,10 @@ export type DoctorHealthContribution = {
   updateWork?: DoctorUpdateWork;
   healthChecks: readonly DoctorHealthCheck[];
   healthCheckIds: readonly string[];
+  /** Read-only work check traced under Gateway maintenance; without one the contribution has work. */
+  pending?: (
+    ctx: DoctorHealthFlowContext,
+  ) => DoctorMaintenancePending | Promise<DoctorMaintenancePending>;
   run: (ctx: DoctorHealthFlowContext) => Promise<void>;
 };
 
